@@ -119,8 +119,26 @@ dmesg_setting_up() {
         fi
 
         echo "hello world" > /dev/kmsg
-        wget http://nagg.ru/wp-content/uploads/2013/01/dmesg.pl --no-check-certificate > /dev/null
+        wget --timeout 10 --tries 1 http://nagg.ru/wp-content/uploads/2013/01/dmesg.pl --no-check-certificate > /dev/null
         chmod +x dmesg.pl
+}
+
+history_setting_up() {
+        history_check=$(cat .bashrc | grep -P 'For history|HISTTIMEFORMAT' | head -1 | grep '' -c)
+
+        if [[ "$history_check" -eq 1 ]]; then
+                history_installation_status="OK"
+                echo; echo "[OK] history already setting up!"
+        else
+                echo "" >> .bashrc
+                echo "# For history" >> .bashrc
+                echo "HISTTIMEFORMAT=\"%h/%d - %H:%M:%S \"" >> .bashrc
+                echo "export HISTSIZE=10000" >> .bashrc
+                echo "export HISTFILESIZE=10000" >> .bashrc
+                echo "shopt -s histappend" >> .bashrc
+                echo "PROMPT_COMMAND='history -a'" >> .bashrc
+                source .bashrc
+        fi
 }
 
 ntp_check() {
@@ -165,7 +183,7 @@ dmesg_check() {
 }
 
 history_check() {
-        history_check=$(cat .bashrc | grep -o "HISTTIMEFORMAT")
+        history_check=$(cat .bashrc | grep 'For history' | head -1 | grep '' -c)
 
         if [[ -n "$history_check" ]]; then
                 history_installation_status="OK"
@@ -189,12 +207,7 @@ logrotate_check() {
         fi
 }
 
-######END FUNCTION SECTOR#####
-
-######Stage 0#####
-echo "--------------------------------------"
-echo "Stage 0: Detect your operation system."
-echo "--------------------------------------"; echo;
+detect_system() {
 
 os=$(uname -s)
 dist_name='unknown'
@@ -273,87 +286,95 @@ esac
 
 dist_name=$(echo $dist_name | tr '[:upper:]' '[:lower:]')
 echo "You operation system is $dist_name-$dist_version."; echo;
+}
 
-#####Stage 1#####
+run() {
+    if [[ $@ != '' ]]; then
+        i=0
+        while [ $# -gt 0 ]; do
+            i=$[i+1]
+            echo "--------------------------------------------------"
+            echo "Stage $i: Trying to install and configure $1."
+            echo "--------------------------------------------------"; echo;
+            case $1 in
+                'dmesg')
+                    dmesg_setting_up
+                    dmesg_check
+                    ;;
+                'history')
+                    history_setting_up
+                    history_check
+                    ;;
+                'ntp')
+                    app_name="ntp"
 
-echo "-------------------------"
-echo "Stage 1: Configure dmesg."
-echo "-------------------------"; echo;
+                    installation_check $app_name install_anyway
+                    print_status $status
 
-dmesg_setting_up
-dmesg_check
+                    if [ "$dist_name" = "debian" ]; then
+                            app_name="ntpdate"
+                            installation_check $app_name install_anyway
+                            print_status $status
+                    fi
 
+                    case $status in
+                            "installation_successfully")
+                                    ntp_setting_up
+                                    ntp_check
+                                    ;;
+                            "already_install")
+                                    ntp_check
+                                    ;;
+                            *)
+                                    echo "[X] $app_name not installed! Configure will fail."; echo
+                                    ntp_installation_status="error";
+                                    ;;
+                    esac
+                    ;;
+                'logrotate')
+                    installation_check $app_name install_anyway
+                    print_status $status
 
-#####Stage 2#####
-echo "---------------------------"
-echo "Stage 2: Configure History."
-echo "---------------------------"; echo;
+                    case $status in
+                            "installation_successfully" | "already_install")
+                                    logrotate_setting_up
+                                    ;;
+                            *)
+                                    echo "[X] logrotate not installed! Configure will fail."; echo
+                                    logrotate_installation_status="error";
+                                    ;;
+                    esac
 
-echo "" >> .bashrc
-echo "# For history" >> .bashrc
-echo "HISTTIMEFORMAT=\"%h/%d - %H:%M:%S c IP: $IP \"" >> .bashrc
-history_check
+                    logrotate_check
+                    ;;
+                *)
+                    echo "[X] can'n setting up $item! Please, check script params."; echo
+                    ;;
+            esac
+            shift
+        done
+    else
+        run dmesg logrotate ntp history
+    fi
+    i=$[i+1]
+    echo "-----------------------------"
+    echo "Stage $i: Summary information."
+    echo "-----------------------------"; echo;
 
+    echo "[$dmesg_installation_status] dmesg configuration"
+    echo "[$history_installation_status] history configuration"
+    echo "[$logrotate_installation_status] logrotate installation"
+    echo "[$ntp_installation_status] ntp installation"
 
-#####Stage 3#####
+    echo; echo
+}
 
-echo "-----------------------------------------"
-echo "Stage 3: Install and configure logrotate."
-echo "-----------------------------------------"; echo;
-app_name="logrotate"
+######END FUNCTION SECTOR#####
+######Stage 0#####
+echo "--------------------------------------"
+echo "Stage 0: Detect your operation system."
+echo "--------------------------------------"; echo;
+detect_system
 
-installation_check $app_name install_anyway
-print_status $status
-
-case $status in
-        "installation_successfully" | "already_install")
-                logrotate_setting_up
-                ;;
-        *)
-                echo "[X] logrotate not installed! Configure will fail."; echo
-                logrotate_installation_status="error";
-                ;;
-esac
-
-logrotate_check
-
-#####Stage 4#####
-echo "-----------------------------------"
-echo "Stage 4: Install and configure ntp."
-echo "-----------------------------------"; echo;
-app_name="ntp"
-
-installation_check $app_name install_anyway
-print_status $status
-
-if [ "$dist_name" = "debian" ]; then
-        app_name="ntpdate"
-        installation_check $app_name install_anyway
-        print_status $status
-fi
-
-case $status in
-        "installation_successfully")
-                ntp_setting_up
-                ntp_check
-                ;;
-        "already_install")
-                ntp_check
-                ;;
-        *)
-                echo "[X] $app_name not installed! Configure will fail."; echo
-                ntp_installation_status="error";
-                ;;
-esac
-
-#####Stage 5#####
-echo "-----------------------------"
-echo "Stage 5: Summary information."
-echo "-----------------------------"; echo;
-
-echo "[$dmesg_installation_status] dmesg configuration"
-echo "[$history_installation_status] history configuration"
-echo "[$logrotate_installation_status] logrotate installation"
-echo "[$ntp_installation_status] ntp installation"
-
-echo; echo
+###Run installation with script args
+run $*
