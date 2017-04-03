@@ -1,8 +1,8 @@
-h2 My own collection of bash script for automatization some processes
+### h2 My own collection of bash script for automatization some processes
 
----
+***
 
-h4 get_random_image.sh
+### h4 get_random_image.sh
 h5 This script may download random image from [this](http://lorempixel.com/) site with your parametrs, such as image resolution and theme.
 
 * 1 - destination folder - path to folder for save images;
